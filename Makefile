@@ -8,4 +8,4 @@ server: server.c
 	gcc server.c -o server
 
 client: client.c
-	gcc server.c -o client
+	gcc client.c -o client
