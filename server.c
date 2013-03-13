@@ -45,32 +45,51 @@ SigCatcher (int n)
 int
 main (void)
 {
-	int server_socket, client_socket, shmid;
+	int server_socket, client_socket, shmidOne, shmidTwo;
 	int client_len;
 	struct sockaddr_in client_addr, server_addr;
-	key_t memShareKey;
+	key_t memShareKeyOne;
+    key_t memShareKeyTwo;
     int * q;
+    int * w; 
 
     //Generate a memory share key
-    memShareKey = ftok (".", 'M');
+    memShareKeyOne = ftok (".", 'M');
+    memShareKeyTwo = ftok (".", 'M');
     
-    if (memShareKey == -1) {
+    if (memShareKeyOne == -1) {
         printf("Cannot allocate memory share key");
     }
     
-    if ((shmid = shmget (memShareKey, sizeof (int), 0)) == -1){
-        shmid = shmget (memShareKey, sizeof (int), IPC_CREAT | 0660);
-        if (shmid == -1){
+    if (memShareKeyTwo == -1) {
+        printf("Cannot allocate memory share key");
+    }
+    
+    if ((shmidOne = shmget (memShareKeyOne, sizeof (int), 0)) == -1){
+        shmidOne = shmget (memShareKeyOne, sizeof (int), IPC_CREAT | 0660);
+        if (shmidOne == -1){
             printf("Cannot allocate new shared memory\n");
         }
     }
     
-    q = (int *)shmat (shmid, NULL, 0);
+    if ((shmidTwo = shmget (memShareKeyTwo, sizeof (int), 0)) == -1){
+        shmidTwo = shmget (memShareKeyTwo, sizeof (int), IPC_CREAT | 0660);
+        if (shmidTwo == -1){
+            printf("Cannot allocate new shared memory\n");
+        }
+    }
+    
+    q = (int *)shmat (shmidOne, NULL, 0);
     if (q == NULL) {
         printf("Oh snap, attached memory failed");
     }
 
+    w = (int *)shmat (shmidTwo, NULL, 0);
+    if (w == NULL) {
+        printf("Oh snap, attached memory failed");
+    }
 
+    
 	/*
 	 * install a signal handler for SIGCHILD (sent when the child terminates)
 	 */
@@ -118,22 +137,23 @@ main (void)
 	 */
     //set the value of q to zero
     *q = 0;
+    *w = 0;
 	while (1) {
 		 // accept a packet from the client
   		client_len = sizeof (client_addr);
 		if ((client_socket = accept (server_socket,(struct sockaddr *)&client_addr, &client_len)) < 0) {
 			printf ("grrr, can't accept a packet from client\n");
-			close (server_socket);
+			//close (server_socket);
 			return 4;
 		}	/* endif */
     
         //read messages from the client
 
-        if (buffer[0] != '\0'){
+        if (buffer[0] != '\0') {
             if (fork() == 0) {
                 printf("%s\n",buffer);
                 buffer[0] = '\0';
-                close (client_socket);
+                //close (client_socket);
             }
             buffer[0] = '\0';
         }
@@ -151,16 +171,25 @@ main (void)
                 }
                 write (client_socket, buffer, strlen (buffer));
                 buffer[0] = '\0';
-                close (client_socket);
+                //close (client_socket);
                 *q = 0;
             }
 		}
-        read (client_socket, buffer, sizeof (buffer));
-
+        if (*w == 0) {
+            *w = 0;
+            if (fork() == 0){
+                read (client_socket, buffer, sizeof (buffer));
+                //close (client_socket);
+                *w = 1;
+            }
+        }
+        
 	}	/* end while */
     close (client_socket);
     shmdt (q);
-    shmctl (shmid, IPC_RMID, 0);
+    shmdt (w);
+    shmctl (shmidOne, IPC_RMID, 0);
+    shmctl (shmidTwo, IPC_RMID, 0);
 	return 0;
 }	/* end main */
 

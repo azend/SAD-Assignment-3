@@ -27,28 +27,47 @@ char buffer[BUFSIZ];
 int
 main (int argc, char *argv[])
 {
-	int client_socket, len, shmid;
+	int client_socket, len, shmidOne, shmidTwo;
 	struct sockaddr_in server_addr;
 	struct hostent *host;
-    key_t memShareKey;
+    key_t memShareKeyOne;
+    key_t memShareKeyTwo;
     int * p;
+    int * o;
     
     //Generate a memory share key
-    memShareKey = ftok (".", 'M');
+    memShareKeyOne = ftok (".", 'M');
+    memShareKeyTwo = ftok (".", 'M');
     
-    if (memShareKey == -1) {
+    if (memShareKeyTwo == -1) {
+        printf("Cannot allocate memory share key");
+    }
+    
+    if (memShareKeyOne == -1) {
         printf("Cannot allocate memory share key");
     }
 
-    if ((shmid = shmget (memShareKey, sizeof (int), 0)) == -1){
-        shmid = shmget (memShareKey, sizeof (int), IPC_CREAT | 0660);
-        if (shmid == -1){
+    if ((shmidOne = shmget (memShareKeyOne, sizeof (int), 0)) == -1){
+        shmidOne = shmget (memShareKeyOne, sizeof (int), IPC_CREAT | 0660);
+        if (shmidOne == -1){
             printf("Cannot allocate new shared memory\n");
         }
     }
     
-    p = (int *)shmat (shmid, NULL, 0);
+    if ((shmidTwo = shmget (memShareKeyTwo, sizeof (int), 0)) == -1){
+        shmidTwo = shmget (memShareKeyTwo, sizeof (int), IPC_CREAT | 0660);
+        if (shmidTwo == -1){
+            printf("Cannot allocate new shared memory\n");
+        }
+    }
+    
+    p = (int *)shmat (shmidOne, NULL, 0);
     if (p == NULL) {
+        printf("Oh snap, attached memory failed");
+    }
+    
+    o = (int *)shmat (shmidTwo, NULL, 0);
+    if (o == NULL) {
         printf("Oh snap, attached memory failed");
     }
 	/*
@@ -102,9 +121,9 @@ main (int argc, char *argv[])
 	 * now that we have a connection, get a commandline from
 	 * the user, and fire it off to the server
 	 */
-     printf("5 I made it to here\n"); 
     //recieve a message from the server
     *p = 0;
+    *o = 0;
     while (1) {
         
                 
@@ -113,7 +132,7 @@ main (int argc, char *argv[])
             if (fork() == 0){
                 printf ("%s\n", buffer);
                 buffer[0] = '\0';
-                close (client_socket);
+                //close (client_socket);
             }
             buffer[0] = '\0';
         }
@@ -132,12 +151,18 @@ main (int argc, char *argv[])
                 strcat (buffer, "\0");
                 write (client_socket, buffer, strlen (buffer));
                 buffer[0] = '\0';
-                close (client_socket);
+                //close (client_socket);
                 *p = 0;
             }
         }
-        read (client_socket, buffer, sizeof (buffer));
-
+        if (*o == 0){
+            *o = 1;
+            if (fork() == 0){
+                read (client_socket, buffer, sizeof (buffer));
+                //close (client_socket);
+                *o = 0;
+            }
+        }
     } // end while
 
 
@@ -146,7 +171,9 @@ main (int argc, char *argv[])
     */
     close (client_socket);
     shmdt (p);
-    shmctl (shmid, IPC_RMID, 0);
+    shmdt (o);
+    shmctl (shmidOne, IPC_RMID, 0);
+    shmctl (shmidTwo, IPC_RMID, 0);
 	return 0;
 }	/* end main */
 
