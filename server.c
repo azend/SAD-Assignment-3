@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -18,6 +20,7 @@
 #include <netdb.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <errno.h>
 
 #define PORT 5000
 
@@ -42,11 +45,30 @@ SigCatcher (int n)
 int
 main (void)
 {
-	int server_socket, client_socket;
+	int server_socket, client_socket, shmid;
 	int client_len;
 	struct sockaddr_in client_addr, server_addr;
-	int len, i;
-	FILE *p;
+	key_t memShareKey;
+    int * q;
+
+    //Generate a memory share key
+    memShareKey = ftok (".", 'M');
+    
+    if (memShareKey == -1) {
+        printf("Cannot allocate memory share key");
+    }
+    
+    if ((shmid = shmget (memShareKey, sizeof (int), 0)) == -1){
+        shmid = shmget (memShareKey, sizeof (int), IPC_CREAT | 0660);
+        if (shmid == -1){
+            printf("Cannot allocate new shared memory\n");
+        }
+    }
+    
+    q = (int *)shmat (shmid, NULL, 0);
+    if (q == NULL) {
+        printf("Oh snap, attached memory failed");
+    }
 
 
 	/*
@@ -58,7 +80,6 @@ main (void)
 	/*
 	 * obtain a socket for the server
 	 */
-
 	if ((server_socket = socket (AF_INET, SOCK_STREAM, 0)) < 0) {
 		printf ("grrr, can't get the server socket\n");
 		return 1;
@@ -67,7 +88,6 @@ main (void)
 	/*
 	 * initialize our server address info for binding purposes
 	 */
-
 	memset (&server_addr, 0, sizeof (server_addr));
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_addr.s_addr = htonl (INADDR_ANY);
@@ -83,7 +103,6 @@ main (void)
 	/*
 	 * start listening on the socket
 	 */
-
 	if (listen (server_socket, 5) < 0) {
 		printf ("grrr, can't listen on socket\n");
 		close (server_socket);
@@ -97,87 +116,51 @@ main (void)
 	 * request, and the parent will continue to listen for the
 	 * next request
 	 */
-
+    //set the value of q to zero
+    *q = 0;
 	while (1) {
-		/*
-		 * accept a packet from the client
-		 */
-
-		client_len = sizeof (client_addr);
+		 // accept a packet from the client
+  		client_len = sizeof (client_addr);
 		if ((client_socket = accept (server_socket,(struct sockaddr *)&client_addr, &client_len)) < 0) {
 			printf ("grrr, can't accept a packet from client\n");
 			close (server_socket);
 			return 4;
 		}	/* endif */
+    
+        //read messages from the client
+
+        if (buffer[0] != '\0'){
+            if (fork() == 0) {
+                printf("%s\n",buffer);
+                buffer[0] = '\0';
+                close (client_socket);
+            }
+            buffer[0] = '\0';
+        }
         
         // Send a message to the client
-		if (fork() == 0) {
-            buffer[1] = '\0';
-            printf("Type a message: ");
-            fflush (stdout);
-            fgets (buffer, sizeof(buffer), stdin);
-            if (buffer[strlen (buffer) - 1] == '\n') {
-                buffer[strlen (buffer) - 1] = '\0';
+        if (*q == 0){
+            *q = 1; // setting q to one will prevent a new fork from launching before the old fork is finished
+            if (fork() == 0) {
+                buffer[0] = '\0';
+                printf("Type a message: ");
+                fflush (stdout);
+                fgets (buffer, sizeof(buffer), stdin);
+                if (buffer[strlen (buffer) - 1] == '\n') {
+                    buffer[strlen (buffer) - 1] = '\0';
+                }
+                write (client_socket, buffer, strlen (buffer));
+                buffer[0] = '\0';
+                close (client_socket);
+                *q = 0;
             }
-            write (client_socket, buffer, strlen (buffer));
-            buffer[1] = '\0';
-        }
-        // If a packet is recieved fork and print the message
-		if (fork() == 0) {
-			/*
-			 * this is done by CHILD ONLY!
-			 * This prints the message sent by the other user
-			 */
-            buffer[1] = '\0';
-			read (client_socket, buffer, BUFSIZ);
-            printf("\n%s",buffer);
-			/*
-			 * process command, and obtain outgoing data
-			 */
-            /*
-			if (strcmp (buffer, "date") == 0) {
-				if (len = (p = popen ("date", "r")) != NULL) {
-					len = fread (buffer, 1, sizeof (buffer), p);
-					pclose (p);
-				} else {
-					strcpy (buffer, "Can't run date command\n");
-					len = strlen (buffer);
-				}	/* endif */
-			/*} else if (strcmp (buffer, "who") == 0) {
-				if (len = (p = popen ("who", "r")) != NULL) {
-					len = fread (buffer, 1, sizeof (buffer), p);
-					pclose (p);
-				} else {
-					strcpy (buffer, "Can't run who command\n");
-					len = strlen (buffer);
-				}	/* endif */
-			/*} else if (strcmp (buffer, "df") == 0) {
-				if (len = (p = popen ("df", "r")) != NULL) {
-					len = fread (buffer, 1, sizeof (buffer), p);
-					pclose (p);
-				} else {
-					strcpy (buffer, "Can't run df command\n");
-					len = strlen (buffer);
-				}	/* endif */
-			/*} else {
-				strcpy (buffer, "invalid command\n");
-				len = strlen (buffer);
-			}*/	/* endif */
+		}
+        read (client_socket, buffer, sizeof (buffer));
 
-			/*
-			 * write data to client, close socket, and exit child app
-			 */
-
-			//write (client_socket, buffer, len);
-			return 0;
-		} else {
-			/*
-			 * this is done by parent ONLY
-			 */
-
-		}	/* endif */
 	}	/* end while */
-
+    close (client_socket);
+    shmdt (q);
+    shmctl (shmid, IPC_RMID, 0);
 	return 0;
 }	/* end main */
 
