@@ -26,6 +26,8 @@
 
 char buffer[BUFSIZ];
 
+int readPid = 0;
+int writePid = 0;
 
 /*
  * this signal handler is used to catch the termination
@@ -38,58 +40,22 @@ char buffer[BUFSIZ];
 void
 SigCatcher (int n)
 {
-    wait3 (NULL, WNOHANG, NULL);    
+	kill( readPid, SIGTERM );
+	kill( writePid, SIGTERM );
+
+	wait3 (NULL, WNOHANG, NULL);    
 	signal (SIGCHLD, SigCatcher);
 }
 
-int
-main (void)
-{
-	int server_socket, client_socket, shmidOne, shmidTwo;
+int main (void) {
+	int server_socket, client_socket;
 	int client_len;
 	struct sockaddr_in client_addr, server_addr;
-	key_t memShareKeyOne;
-    key_t memShareKeyTwo;
-    int * q;
-    int * w; 
-
-    //Generate a memory share key
-    memShareKeyOne = ftok (".", 'M');
-    memShareKeyTwo = ftok (".", 'M');
-    
-    if (memShareKeyOne == -1) {
-        printf("Cannot allocate memory share key");
-    }
-    
-    if (memShareKeyTwo == -1) {
-        printf("Cannot allocate memory share key");
-    }
-    
-    if ((shmidOne = shmget (memShareKeyOne, sizeof (int), 0)) == -1){
-        shmidOne = shmget (memShareKeyOne, sizeof (int), IPC_CREAT | 0660);
-        if (shmidOne == -1){
-            printf("Cannot allocate new shared memory\n");
-        }
-    }
-    
-    if ((shmidTwo = shmget (memShareKeyTwo, sizeof (int), 0)) == -1){
-        shmidTwo = shmget (memShareKeyTwo, sizeof (int), IPC_CREAT | 0660);
-        if (shmidTwo == -1){
-            printf("Cannot allocate new shared memory\n");
-        }
-    }
-    
-    q = (int *)shmat (shmidOne, NULL, 0);
-    if (q == NULL) {
-        printf("Oh snap, attached memory failed");
-    }
-
-    w = (int *)shmat (shmidTwo, NULL, 0);
-    if (w == NULL) {
-        printf("Oh snap, attached memory failed");
-    }
-
-    
+	
+	int bytesRead = 0;
+	
+	int status = 0;
+  
 	/*
 	 * install a signal handler for SIGCHILD (sent when the child terminates)
 	 */
@@ -135,9 +101,7 @@ main (void)
 	 * request, and the parent will continue to listen for the
 	 * next request
 	 */
-    //set the value of q to zero
-    *q = 0;
-    *w = 0;
+
 	while (1) {
 		 // accept a packet from the client
   		client_len = sizeof (client_addr);
@@ -146,50 +110,62 @@ main (void)
 			//close (server_socket);
 			return 4;
 		}	/* endif */
-    
-        //read messages from the client
+   
 
-        if (buffer[0] != '\0') {
-            if (fork() == 0) {
-                printf("%s\n",buffer);
-                buffer[0] = '\0';
-                //close (client_socket);
-            }
-            buffer[0] = '\0';
-        }
-        
-        // Send a message to the client
-        if (*q == 0){
-            *q = 1; // setting q to one will prevent a new fork from launching before the old fork is finished
-            if (fork() == 0) {
-                buffer[0] = '\0';
-                printf("Type a message: ");
-                fflush (stdout);
-                fgets (buffer, sizeof(buffer), stdin);
-                if (buffer[strlen (buffer) - 1] == '\n') {
-                    buffer[strlen (buffer) - 1] = '\0';
-                }
-                write (client_socket, buffer, strlen (buffer));
-                buffer[0] = '\0';
-                //close (client_socket);
-                *q = 0;
-            }
+		if ( ( readPid = fork() ) == 0 ) {
+			close( server_socket );
+
+			while (1) {
+				if ( ( bytesRead = read( client_socket, buffer, BUFSIZ ) ) <= 0 ) {
+					if ( bytesRead == 0 ) {
+						printf("The client closed the connection.\n");
+					}
+					else {
+						perror("There was an error with the connection.\n");
+					}
+					break;
+				}
+				else {
+					printf(">>> %s", buffer);
+				}
+
+				//readBuffer[0] = 0; // Empty the stringa
+
+				strcpy( buffer, "" );
+			}
 		}
-        if (*w == 0) {
-            *w = 0;
-            if (fork() == 0){
-                read (client_socket, buffer, sizeof (buffer));
-                //close (client_socket);
-                *w = 1;
-            }
-        }
-        
-	}	/* end while */
-    close (client_socket);
-    shmdt (q);
-    shmdt (w);
-    shmctl (shmidOne, IPC_RMID, 0);
-    shmctl (shmidTwo, IPC_RMID, 0);
+
+		else if ( ( writePid = fork() ) == 0 ) {
+			close( server_socket );
+
+			while (1) {
+				if ( !feof( stdin ) ) {
+					fgets( buffer, BUFSIZ, stdin );
+				
+					if ( write( client_socket, buffer, BUFSIZ ) != -1 ) {
+						printf( "<<< %s", buffer );
+						fflush( stdout );
+
+						//writeBuffer[0] = 0;
+						//strcpy(buffer, "" );
+	
+					}
+					else {
+						break;
+					}
+
+				}
+			}
+
+		}
+
+		close (client_socket);
+
+		waitpid(readPid, &status, WUNTRACED);
+		waitpid(writePid, &status, WUNTRACED);
+
+	}
+
 	return 0;
 }	/* end main */
 
