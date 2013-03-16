@@ -111,8 +111,10 @@ int main (void) {
 			return 4;
 		}	/* endif */
    
+		readPid = fork();
+		writePid = fork();
 
-		if ( ( readPid = fork() ) == 0 ) {
+		if ( readPid == 0 ) {
 			close( server_socket );
 
 			while (1) {
@@ -123,6 +125,8 @@ int main (void) {
 					else {
 						perror("There was an error with the connection.\n");
 					}
+
+					close( client_socket );
 					break;
 				}
 				else {
@@ -135,7 +139,7 @@ int main (void) {
 			}
 		}
 
-		else if ( ( writePid = fork() ) == 0 ) {
+		else if ( writePid == 0 ) {
 			close( server_socket );
 
 			while (1) {
@@ -151,6 +155,7 @@ int main (void) {
 	
 					}
 					else {
+						close( client_socket );
 						break;
 					}
 
@@ -158,8 +163,10 @@ int main (void) {
 			}
 
 		}
-
-		close (client_socket);
+		
+		else {
+			close( client_socket );	
+		}
 
 		waitpid(readPid, &status, WUNTRACED);
 		waitpid(writePid, &status, WUNTRACED);
